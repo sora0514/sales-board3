@@ -1,0 +1,398 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>営業改善進捗ボード PRO v3.1</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&family=Noto+Sans+JP:wght@400;700&display=swap');
+        body { font-family: 'Inter', 'Noto Sans JP', sans-serif; }
+        .sidebar-dark { background-color: #0f172a; }
+        .status-badge { padding: 4px 12px; border-radius: 9999px; font-size: 11px; font-weight: 700; }
+        .amount-font { font-family: 'Inter', sans-serif; letter-spacing: 0.02em; }
+        .card-shadow { box-shadow: 0 1px 3px rgba(0,0,0,0.1), 0 1px 2px rgba(0,0,0,0.06); }
+        .custom-scrollbar::-webkit-scrollbar { width: 6px; }
+        .custom-scrollbar::-webkit-scrollbar-track { background: transparent; }
+        .custom-scrollbar::-webkit-scrollbar-thumb { background: #334155; border-radius: 10px; }
+        .metric-card { background: white; border-radius: 1rem; padding: 1.25rem; border: 1px solid #e2e8f0; }
+        .edit-input { background-color: #f8fafc; border: 1px solid #e2e8f0; padding: 4px 8px; border-radius: 6px; font-size: 0.875rem; width: 100%; transition: all 0.2s; }
+        .edit-input:focus { background-color: white; border-color: #3b82f6; outline: none; box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1); }
+        .save-indicator { transition: opacity 0.3s; opacity: 0; pointer-events: none; }
+        .save-indicator.show { opacity: 1; }
+    </style>
+</head>
+<body class="bg-slate-50 text-slate-900 overflow-hidden">
+    <div id="app" class="flex h-screen overflow-hidden">
+        
+        <!-- Sidebar -->
+        <aside class="w-72 sidebar-dark text-slate-300 flex flex-col shrink-0 z-20 shadow-2xl">
+            <div class="flex-1 overflow-y-auto custom-scrollbar p-8">
+                <div class="flex items-center gap-3 text-white mb-10">
+                    <div class="bg-blue-600 p-2 rounded-xl">
+                        <i data-lucide="shield-check" size="20"></i>
+                    </div>
+                    <h1 class="font-bold text-xl tracking-tight">SalesBoard <span class="text-blue-500">PRO</span></h1>
+                </div>
+
+                <nav class="mb-10 space-y-1">
+                    <p class="text-[10px] font-bold text-slate-500 uppercase tracking-[0.2em] mb-3 px-2">Navigation</p>
+                    <button onclick="switchView('leads')" id="nav-leads" class="w-full flex items-center gap-3 px-4 py-3 rounded-xl bg-blue-600 text-white font-bold transition-all shadow-lg shadow-blue-500/20">
+                        <i data-lucide="list-todo" size="18"></i> <span>案件管理</span>
+                    </button>
+                    <button onclick="switchView('analytics')" id="nav-analytics" class="w-full flex items-center gap-3 px-4 py-3 rounded-xl hover:bg-slate-800 text-slate-400 font-bold transition-all">
+                        <i data-lucide="bar-chart-3" size="18"></i> <span>トレンド分析</span>
+                    </button>
+                </nav>
+
+                <div id="sidebar-summary" class="bg-slate-800/50 rounded-2xl p-6 border border-slate-700/50 mb-8">
+                    <p id="summary-month-label" class="text-xs text-slate-400 font-bold mb-4 tracking-widest uppercase">Target Month</p>
+                    <div class="space-y-4">
+                        <div>
+                            <p class="text-[10px] text-slate-500 uppercase font-bold">確定売上 (選択月)</p>
+                            <p id="total-sales-sidebar" class="text-2xl font-bold text-white amount-font">¥0</p>
+                        </div>
+                        <div class="flex justify-between border-t border-slate-700 pt-4">
+                            <div>
+                                <p class="text-[10px] text-slate-500 font-bold">利益合計</p>
+                                <p id="total-profit-sidebar" class="text-lg font-bold text-emerald-400 amount-font">¥0</p>
+                            </div>
+                            <div class="text-right">
+                                <p class="text-[10px] text-slate-500 font-bold">利益率</p>
+                                <p id="total-margin-pct-sidebar" class="text-lg font-bold text-white amount-font">0%</p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <nav id="sidebar-funnel" class="pb-4">
+                    <p class="text-[10px] font-bold text-slate-500 uppercase tracking-[0.2em] mb-4 px-2">Current Funnel</p>
+                    <div id="funnel-container" class="space-y-1"></div>
+                </nav>
+            </div>
+
+            <div class="p-6 bg-slate-900/80 border-t border-slate-800 backdrop-blur-sm">
+                <button id="toggle-edit-mode" class="flex items-center justify-center gap-2 w-full py-3 rounded-xl bg-slate-800 hover:bg-slate-700 text-sm font-bold transition-all border border-slate-700 text-slate-300 shadow-lg">
+                    <i data-lucide="edit-3" size="16"></i> <span id="edit-mode-text">編集モード切替</span>
+                </button>
+            </div>
+        </aside>
+
+        <!-- Main Content -->
+        <main class="flex-1 flex flex-col min-w-0 bg-slate-50 overflow-hidden">
+            <header class="h-20 px-10 flex items-center justify-between bg-white border-b border-slate-200 shrink-0">
+                <div class="flex items-center gap-4">
+                    <div class="relative group">
+                        <select id="month-selector" class="appearance-none bg-slate-100 pl-4 pr-10 py-2.5 rounded-xl text-sm font-bold text-slate-700 outline-none cursor-pointer border-none"></select>
+                        <i data-lucide="calendar" size="14" class="absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none text-slate-400"></i>
+                    </div>
+                    <button onclick="addNewMonth()" class="p-2.5 bg-slate-100 hover:bg-slate-200 text-slate-600 rounded-xl transition-all"><i data-lucide="calendar-plus" size="18"></i></button>
+                    <div class="relative group">
+                        <i data-lucide="search" size="16" class="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400"></i>
+                        <input id="search-input" type="text" placeholder="案件名やステータスで検索..." class="pl-11 pr-4 py-2.5 bg-slate-100 rounded-xl text-sm w-64 focus:w-80 transition-all outline-none">
+                    </div>
+                    <div id="save-indicator" class="save-indicator flex items-center gap-2 text-[10px] font-bold text-slate-400 bg-slate-50 px-3 py-1.5 rounded-full border border-slate-200">
+                        <i data-lucide="cloud-check" size="12" class="text-emerald-500"></i>
+                        <span>自動保存済み</span>
+                    </div>
+                </div>
+                <button id="add-lead-btn" class="bg-blue-600 hover:bg-blue-700 text-white px-6 py-2.5 rounded-xl text-sm font-bold flex items-center gap-2 shadow-lg shadow-blue-500/20">
+                    <i data-lucide="plus" size="18"></i> <span>案件新規登録</span>
+                </button>
+            </header>
+
+            <div id="content-scroll" class="flex-1 overflow-y-auto p-10 custom-scrollbar">
+                
+                <!-- View 1: Leads List -->
+                <div id="view-leads" class="max-w-6xl mx-auto space-y-6">
+                    <div class="grid grid-cols-12 gap-4 px-6 text-[10px] font-black text-slate-400 uppercase tracking-widest">
+                        <div class="col-span-4">Project Details</div>
+                        <div class="col-span-2 text-center">Status</div>
+                        <div class="col-span-2 text-right">Revenue</div>
+                        <div class="col-span-2 text-right">Cost</div>
+                        <div class="col-span-2 text-right">Profit</div>
+                    </div>
+                    <div id="leads-list" class="space-y-3"></div>
+                </div>
+
+                <!-- View 2: Analytics -->
+                <div id="view-analytics" class="max-w-6xl mx-auto hidden space-y-8 pb-10">
+                    <div class="grid grid-cols-1 md:grid-cols-4 gap-4">
+                        <div class="metric-card shadow-sm border-l-4 border-l-slate-800">
+                            <p class="text-[10px] text-slate-500 font-bold uppercase mb-1">Total Sales (全期間)</p>
+                            <span id="kpi-sales" class="text-2xl font-black amount-font text-slate-800">--</span>
+                        </div>
+                        <div class="metric-card bg-slate-900 text-white border-none shadow-lg">
+                            <p class="text-[10px] text-slate-400 font-bold uppercase mb-1">トータル粗利 (全期間)</p>
+                            <span id="kpi-total-profit" class="text-2xl font-black amount-font text-emerald-400">--</span>
+                        </div>
+                        <div class="metric-card shadow-sm border-l-4 border-l-blue-600">
+                            <p class="text-[10px] text-slate-500 font-bold uppercase mb-1">平均成約単価 (全期間)</p>
+                            <span id="kpi-avg-price" class="text-2xl font-black amount-font text-blue-600">--</span>
+                        </div>
+                        <div class="metric-card shadow-sm border-l-4 border-l-emerald-600">
+                            <p class="text-[10px] text-slate-500 font-bold uppercase mb-1">成約率 (全期間)</p>
+                            <span id="kpi-win-rate" class="text-2xl font-black amount-font text-emerald-600">--%</span>
+                        </div>
+                    </div>
+
+                    <div class="space-y-6">
+                        <div class="bg-white p-8 rounded-2xl border border-slate-200 shadow-sm">
+                            <div class="flex justify-between items-center mb-8">
+                                <h3 class="font-bold text-slate-800 flex items-center gap-2 text-sm uppercase tracking-wider">
+                                    <i data-lucide="bar-chart-horizontal" size="18" class="text-blue-600"></i> 月別：利益額(粗利) ＆ 成約率実績 (棒グラフ)
+                                </h3>
+                            </div>
+                            <div class="h-96 w-full"><canvas id="performanceTrendChart"></canvas></div>
+                        </div>
+
+                        <div class="bg-white p-8 rounded-2xl border border-slate-200 shadow-sm">
+                            <h3 class="font-bold text-slate-800 mb-6 flex items-center gap-2 text-sm uppercase tracking-wider">
+                                <i data-lucide="trending-up" size="18" class="text-slate-400"></i> 月別：収益・利益推移
+                            </h3>
+                            <div class="h-64 w-full"><canvas id="financialChart"></canvas></div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </main>
+    </div>
+
+    <!-- Month Modal -->
+    <div id="month-modal" class="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-[100] flex items-center justify-center hidden">
+        <div class="bg-white p-8 rounded-3xl shadow-2xl w-96">
+            <h3 class="text-xl font-bold mb-4">表示月の追加</h3>
+            <input type="month" id="new-month-input" class="w-full p-4 bg-slate-50 border border-slate-200 rounded-xl mb-6 outline-none">
+            <div class="flex gap-3">
+                <button onclick="closeMonthModal()" class="flex-1 py-3 text-sm font-bold text-slate-600 bg-slate-100 rounded-xl">キャンセル</button>
+                <button onclick="confirmMonthAdd()" class="flex-1 py-3 bg-blue-600 text-white rounded-xl text-sm font-bold">追加</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const STATUS_STEPS = ['アポイント済', '現調済', '見積提示', '成約'];
+        const STATUS_THEMES = {
+            'アポイント済': 'bg-slate-100 text-slate-600 border border-slate-200',
+            '現調済': 'bg-amber-100 text-amber-700 border border-amber-200',
+            '見積提示': 'bg-blue-100 text-blue-700 border border-blue-200',
+            '成約': 'bg-emerald-100 text-emerald-700 border border-emerald-200'
+        };
+
+        const STORAGE_KEY = 'sales_board_pro_data';
+        let leads = [];
+        let currentView = 'leads';
+        let selectedMonth = new Date().toISOString().slice(0, 7);
+        let isEditMode = false;
+        let searchQuery = '';
+        let charts = { financial: null, performanceTrend: null };
+
+        const fmt = n => new Intl.NumberFormat('ja-JP').format(n);
+
+        function loadData() {
+            const saved = localStorage.getItem(STORAGE_KEY);
+            if (saved) {
+                try {
+                    const parsed = JSON.parse(saved);
+                    leads = parsed.leads || [];
+                    if (leads.length > 0) {
+                        const uniqueMonths = Array.from(new Set(leads.map(l => l.month))).sort().reverse();
+                        if (uniqueMonths.includes(selectedMonth) === false) selectedMonth = uniqueMonths[0];
+                    }
+                } catch (e) { console.error(e); }
+            } else {
+                leads = [
+                    { id: 1, name: '港区 A様ビル改修工事', status: '成約', price: 1200000, cost: 820000, month: '2026-03' },
+                    { id: 2, name: '中央区 B様邸リフォーム', status: '見積提示', price: 420000, cost: 280000, month: '2026-03' }
+                ];
+                saveToLocalStorage();
+            }
+        }
+
+        function saveToLocalStorage() {
+            localStorage.setItem(STORAGE_KEY, JSON.stringify({ leads }));
+            const el = document.getElementById('save-indicator');
+            el.classList.add('show');
+            setTimeout(() => el.classList.remove('show'), 2000);
+        }
+
+        function refreshUI() {
+            renderLeads();
+            updateSidebar();
+            updateMonthSelector();
+            if(currentView === 'analytics') renderAnalytics();
+            lucide.createIcons();
+        }
+
+        function switchView(view) {
+            currentView = view;
+            document.getElementById('view-leads').classList.toggle('hidden', view !== 'leads');
+            document.getElementById('view-analytics').classList.toggle('hidden', view !== 'analytics');
+            document.getElementById('nav-leads').className = `w-full flex items-center gap-3 px-4 py-3 rounded-xl font-bold transition-all ${view === 'leads' ? 'bg-blue-600 text-white shadow-lg shadow-blue-500/20' : 'text-slate-400 hover:bg-slate-800'}`;
+            document.getElementById('nav-analytics').className = `w-full flex items-center gap-3 px-4 py-3 rounded-xl font-bold transition-all ${view === 'analytics' ? 'bg-blue-600 text-white shadow-lg shadow-blue-500/20' : 'text-slate-400 hover:bg-slate-800'}`;
+            if(view === 'analytics') setTimeout(renderAnalytics, 50);
+            lucide.createIcons();
+        }
+
+        function renderLeads() {
+            const list = document.getElementById('leads-list');
+            const filtered = leads.filter(l => {
+                const q = searchQuery.toLowerCase();
+                return (q === '' || l.name.toLowerCase().includes(q) || l.status.toLowerCase().includes(q)) && (searchQuery !== '' || l.month === selectedMonth);
+            }).sort((a, b) => b.id - a.id);
+            
+            list.innerHTML = filtered.length ? filtered.map(lead => {
+                const profit = lead.price - lead.cost;
+                return `
+                <div class="grid grid-cols-12 gap-4 items-center bg-white rounded-2xl p-5 card-shadow border ${isEditMode ? 'border-blue-400' : 'border-transparent'}">
+                    <div class="col-span-4 flex items-center gap-4">
+                        <div class="w-10 h-10 rounded-xl ${lead.status === '成約' ? 'bg-emerald-50 text-emerald-500' : 'bg-slate-100 text-slate-400'} flex items-center justify-center">
+                            <i data-lucide="briefcase" size="18"></i>
+                        </div>
+                        <div class="flex-1 min-w-0">
+                            ${isEditMode ? `<input class="edit-input font-bold" value="${lead.name}" oninput="updateLead(${lead.id}, 'name', this.value)">` : `<p class="text-sm font-bold truncate">${lead.name}</p>`}
+                        </div>
+                    </div>
+                    <div class="col-span-2 flex justify-center">
+                        ${isEditMode ? `<select onchange="updateLead(${lead.id}, 'status', this.value)" class="edit-input font-bold text-xs">${STATUS_STEPS.map(s => `<option value="${s}" ${s === lead.status ? 'selected' : ''}>${s}</option>`).join('')}</select>` : `<span class="status-badge ${STATUS_THEMES[lead.status]}">${lead.status}</span>`}
+                    </div>
+                    <div class="col-span-2 text-right">${isEditMode ? `<input type="number" value="${lead.price}" oninput="updateLead(${lead.id}, 'price', Number(this.value))" class="edit-input text-right">` : `<span class="text-sm font-bold amount-font">¥${fmt(lead.price)}</span>`}</div>
+                    <div class="col-span-2 text-right">${isEditMode ? `<input type="number" value="${lead.cost}" oninput="updateLead(${lead.id}, 'cost', Number(this.value))" class="edit-input text-right">` : `<span class="text-sm text-slate-500 amount-font">¥${fmt(lead.cost)}</span>`}</div>
+                    <div class="col-span-2 flex items-center justify-end gap-3">
+                        <span class="text-sm font-bold ${profit >= 0 ? 'text-blue-600' : 'text-red-600'} amount-font">¥${fmt(profit)}</span>
+                        ${isEditMode ? `<button onclick="deleteLead(${lead.id})" class="text-slate-300 hover:text-red-500 transition-all"><i data-lucide="trash-2" size="14"></i></button>` : ''}
+                    </div>
+                </div>`;
+            }).join('') : `<div class="py-20 text-center text-slate-400 bg-white rounded-3xl border-2 border-dashed">データがありません</div>`;
+            lucide.createIcons();
+        }
+
+        function updateSidebar() {
+            const curLeads = leads.filter(l => l.month === selectedMonth);
+            const closed = curLeads.filter(l => l.status === '成約');
+            const sales = closed.reduce((sum, l) => sum + l.price, 0);
+            const profit = sales - closed.reduce((sum, l) => sum + l.cost, 0);
+            document.getElementById('summary-month-label').textContent = `${selectedMonth.replace('-', '年')}月分`;
+            document.getElementById('total-sales-sidebar').textContent = `¥${fmt(sales)}`;
+            document.getElementById('total-profit-sidebar').textContent = `¥${fmt(profit)}`;
+            document.getElementById('total-margin-pct-sidebar').textContent = (sales > 0 ? Math.round((profit / sales) * 100) : 0) + '%';
+            document.getElementById('funnel-container').innerHTML = STATUS_STEPS.map(step => `<div class="flex items-center justify-between px-2 py-1.5"><span class="text-xs font-bold text-slate-500">${step}</span><span class="text-xs font-bold text-white bg-slate-800 px-2 rounded">${curLeads.filter(l => l.status === step).length}</span></div>`).join('');
+        }
+
+        function renderAnalytics() {
+            const closed = leads.filter(l => l.status === '成約');
+            const totalSales = closed.reduce((s, l) => s + l.price, 0);
+            const totalCost = closed.reduce((s, l) => s + l.cost, 0);
+            const totalProfit = totalSales - totalCost;
+
+            document.getElementById('kpi-sales').innerText = `¥${fmt(totalSales)}`;
+            document.getElementById('kpi-total-profit').innerText = `¥${fmt(totalProfit)}`;
+            document.getElementById('kpi-avg-price').innerText = `¥${fmt(closed.length ? Math.round(totalSales / closed.length) : 0)}`;
+            document.getElementById('kpi-win-rate').innerText = (leads.length ? Math.round((closed.length / leads.length) * 100) : 0) + '%';
+
+            const months = Array.from(new Set(leads.map(l => l.month))).sort();
+            const salesT = [], profitT = [], winRateT = [];
+
+            months.forEach(m => {
+                const mL = leads.filter(l => l.month === m);
+                const mC = mL.filter(l => l.status === '成約');
+                const mS = mC.reduce((s, l) => s + l.price, 0);
+                const mP = mS - mC.reduce((s, l) => s + l.cost, 0);
+                salesT.push(mS);
+                profitT.push(mP);
+                winRateT.push(mL.length ? Math.round((mC.length / mL.length) * 100) : 0);
+            });
+
+            if (charts.performanceTrend) charts.performanceTrend.destroy();
+            charts.performanceTrend = new Chart(document.getElementById('performanceTrendChart'), {
+                type: 'bar',
+                data: {
+                    labels: months.map(m => m.split('-')[1] + '月'),
+                    datasets: [
+                        { label: '利益額 (粗利)', data: profitT, backgroundColor: '#3b82f6', borderRadius: 6, yAxisID: 'y' },
+                        { label: '成約率 (%)', data: winRateT, backgroundColor: 'rgba(16, 185, 129, 0.7)', borderRadius: 6, yAxisID: 'y1' }
+                    ]
+                },
+                options: { 
+                    responsive: true, 
+                    maintainAspectRatio: false, 
+                    scales: { 
+                        y: { type: 'linear', position: 'left', beginAtZero: true, title: { display: true, text: '利益額 (円)' } }, 
+                        y1: { type: 'linear', position: 'right', min: 0, max: 100, title: { display: true, text: '成約率 (%)' }, grid: { drawOnChartArea: false } } 
+                    } 
+                }
+            });
+
+            if (charts.financial) charts.financial.destroy();
+            charts.financial = new Chart(document.getElementById('financialChart'), {
+                type: 'bar',
+                data: {
+                    labels: months.map(m => m.split('-')[1] + '月'),
+                    datasets: [
+                        { label: '総売上', data: salesT, backgroundColor: '#cbd5e1', borderRadius: 4 },
+                        { label: '利益額', data: profitT, backgroundColor: '#334155', borderRadius: 4 }
+                    ]
+                },
+                options: { responsive: true, maintainAspectRatio: false }
+            });
+        }
+
+        let dbTimer;
+        function updateLead(id, field, val) {
+            leads = leads.map(l => l.id === id ? {...l, [field]: val} : l);
+            updateSidebar();
+            clearTimeout(dbTimer);
+            dbTimer = setTimeout(saveToLocalStorage, 500);
+        }
+
+        function deleteLead(id) {
+            if(!confirm('削除しますか？')) return;
+            leads = leads.filter(l => l.id !== id);
+            saveToLocalStorage();
+            refreshUI();
+        }
+
+        function addNewMonth() { document.getElementById('month-modal').classList.remove('hidden'); }
+        function closeMonthModal() { document.getElementById('month-modal').classList.add('hidden'); }
+        function confirmMonthAdd() {
+            const val = document.getElementById('new-month-input').value;
+            if(!val) return;
+            selectedMonth = val;
+            updateMonthSelector();
+            closeMonthModal();
+            refreshUI();
+            saveToLocalStorage();
+        }
+
+        function updateMonthSelector() {
+            const ms = Array.from(new Set(leads.map(l => l.month)));
+            if(!ms.includes(selectedMonth)) ms.push(selectedMonth);
+            ms.sort().reverse();
+            document.getElementById('month-selector').innerHTML = ms.map(m => `<option value="${m}" ${m === selectedMonth ? 'selected' : ''}>${m.replace('-', '年')}月分</option>`).join('');
+        }
+
+        window.onload = () => {
+            loadData();
+            updateMonthSelector();
+            refreshUI();
+            document.getElementById('toggle-edit-mode').onclick = () => {
+                isEditMode = !isEditMode;
+                document.getElementById('edit-mode-text').innerText = isEditMode ? '完了' : '編集モード切替';
+                document.getElementById('toggle-edit-mode').classList.toggle('bg-blue-600', isEditMode);
+                if (!isEditMode) saveToLocalStorage();
+                renderLeads();
+            };
+            document.getElementById('add-lead-btn').onclick = () => {
+                leads.unshift({ id: Date.now(), name: '新規案件', status: 'アポイント済', price: 0, cost: 0, month: selectedMonth });
+                isEditMode = true;
+                saveToLocalStorage();
+                refreshUI();
+            };
+            document.getElementById('search-input').oninput = (e) => { searchQuery = e.target.value; renderLeads(); };
+            document.getElementById('month-selector').onchange = (e) => { selectedMonth = e.target.value; searchQuery = ''; document.getElementById('search-input').value = ''; refreshUI(); };
+        };
+    </script>
+</body>
+</html>
